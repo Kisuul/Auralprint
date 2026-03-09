@@ -22,10 +22,10 @@ function deepMerge(baseValue, patchValue) {
   return merged;
 }
 
-export let preferences = sanitizePreferences(CONFIG.defaults);
+export let preferences = deepClone(CONFIG.defaults);
 
 export const runtime = {
-  settings: deepClone(preferences),
+  settings: deepClone(CONFIG.defaults),
 };
 
 export function resolveRuntimeSettings() {
@@ -34,17 +34,16 @@ export function resolveRuntimeSettings() {
 }
 
 export function setPreferences(nextPreferences) {
-  const sanitized = sanitizePreferences(nextPreferences);
-  preferences = sanitized;
-  runtime.settings = deepClone(sanitized);
-  return runtime.settings;
+  preferences = deepClone(nextPreferences);
+  return resolveRuntimeSettings();
 }
 
 export function patchPreferences(partialPreferences) {
-  const merged = deepMerge(preferences, partialPreferences);
-  return setPreferences(merged);
+  preferences = deepMerge(preferences, partialPreferences);
+  return resolveRuntimeSettings();
 }
 
 export function resetPreferences() {
-  return setPreferences(CONFIG.defaults);
+  preferences = deepClone(CONFIG.defaults);
+  return resolveRuntimeSettings();
 }
