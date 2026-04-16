@@ -1,286 +1,223 @@
-# Auralprint (Build 113 / v0.1.13)
+# Auralprint Roadmap (Builds 110 → 120)
 
-Auralprint is an **audio analyzer first** and an expressive visual system second. It turns physically grounded signal analysis into visual output without pretending visuals are the analysis itself.
+This repo tracks **Auralprint** an offline-capable audio analysis suite.(“analyzer cosplaying as a visualizer”).
 
-## Executive Summary
+## Versioning and what the numbers mean
 
-Auralprint processes audio as a time-varying pressure signal represented digitally as PCM samples. Analysis views (waveform, level, spectrum, spectrogram, stereo correlation) each reveal different truths and have specific failure modes. Any future architecture must preserve this distinction:
+Auralprint uses three related identifiers:
 
-1. **Physical reality**: sound pressure over time.
-2. **Engineering representation**: sampled, quantized digital signals with finite precision.
-3. **Implementation choice**: analyzer parameters, smoothing, window size, meter ballistics, rendering style.
+- **App Version**: `v0.1.xx` (user-facing).
+- **Build Number**: `1xx` (engineering shorthand) where **Build = 100 + xx**.  
+  Example: `v0.1.11` ⇔ **Build 111**.
+- **Release N**: “what users get”. A release points at exactly one canonical build (tagged and packaged).
 
-The system should remain explicit about what is measured, how it is measured, and with what assumptions.
+> Rule: **Interfaces are canon; modules are mutable.** If an option changes behavior, it must be exposed via UX or documented as code-only.
 
-## Core Concepts (Briefing for Engineering Readiness)
+## Canonical release history
 
-### 1) What audio is in engineering terms
+- **Release 1** — **Build 110** (`v0.1.10`) — legacy shipped baseline  
+- **Release 2** — **Build 111** (`v0.1.11`) — previous canonical shipped baseline  
+- **Release 3** — **Build 113** (`v0.1.13`) — current canonical shipped baseline
 
-- **Physically grounded fact**: Audible sound is air pressure variation over time.
-- Key dimensions:
-  - **Time**: when pressure changes occur.
-  - **Amplitude**: magnitude of pressure deviation.
-  - **Frequency**: cycles per second for periodic components.
-  - **Phase**: relative timing/alignment between components/signals.
-- **Periodic vs non-periodic**:
-  - Periodic signals repeat (e.g., near-sinusoidal tones).
-  - Non-periodic signals do not (speech, percussion, noise-like content).
-- **Harmonics / overtones**:
-  - Harmonics are integer multiples of a fundamental frequency.
-  - Overtones are frequencies above the fundamental (not always integer multiples).
-- **Noise** is broadband/random-like energy.
-- **Transients** are rapid, short-lived events (attacks, clicks), often wideband.
+The project uses intermediate builds (e.g., 112, 114–120) as structured milestones. Not every milestone is necessarily shipped to users.
 
-### 2) How digital audio represents sound
+## Build status overview
 
-- **PCM**: sequence of sample values at regular intervals.
-- **Sample rate** (Hz): samples per second (time precision and max analyzable band).
-- **Bit depth**: quantization precision per sample (noise floor/dynamic range implications).
-- **Channels**: independent streams (mono, stereo L/R, multichannel).
-- **Quantization**: mapping continuous amplitude to discrete levels (introduces quantization error).
-- **Clipping**: signal exceeds representable range (hard distortion, lost peaks).
-- **Dynamic range**: span between noise floor and maximum level.
-- **Stereo center** (engineering convention): often approximated by L+R summation (and side by L−R).
+| Build | App Version | Release | Status | Theme |
+|------:|:-----------:|:-------:|:------:|:------|
+| 110 | v0.1.10 | R1 | ✅ Shipped (legacy) | Baseline analyzer/visual foundation |
+| 111 | v0.1.11 | R2 | ✅ Shipped (previous canonical) | Stability + stereo-orb baseline + band HUD |
+| 112 | v0.1.12 | — | ✅ Shipped (Internal) | Scrubber + Playlist/Queue |
+| 113 | v0.1.13 | R3 | ✅ Shipped (canonical) | Recording / Capture + band distribution modes |
+| 114 | v0.1.14 | — | Planned | Live input sources (mic/tab/stream) |
+| 115 | v0.1.15 | — | Planned | Orbs overhaul v1 (per-orb spectral + color phase) |
+| 116 | v0.1.16 | — | Planned | Camera controls (render ≠ sim) |
+| 117 | v0.1.17 | — | Planned | UX polish + performance hardening |
+| 118 | v0.1.18 | — | Planned | Per-orb band picker UI |
+| 119 | v0.1.19 | — | Planned | Workflow upgrades (preset export/import helpers) |
+| 120 | v0.1.20 | (candidate) | Planned | 3D orbs + perspective projection |
 
-### 3) Time-domain vs frequency-domain thinking
+---
 
-- **Waveform view**: sample amplitude over time (good for transients, clipping, envelope shape).
-- **Peaks vs RMS/energy**:
-  - Peak captures instantaneous extremes.
-  - RMS/energy better tracks sustained power.
-- **FFT (simplified)**: estimates frequency content over a finite time window.
-- **Spectral bins**: discrete frequency buckets determined by FFT size and sample rate.
-- **Windowing**: tapers frame edges to reduce leakage (implementation choice with tradeoffs).
-- **Smoothing**: stabilizes display but can hide dynamics.
-- **Dominant regions**: useful shorthand, but context-dependent.
-- Frequency analysis is always **approximate and parameter-dependent** (window size/type, hop size, smoothing, averaging).
+## Build 111 — v0.1.11 (Release 2, ✅ shipped - previous canonical)
 
-### 4) Practical concepts for analysis tools
+**Intent:** stable baseline users already love.
 
-- **Nyquist**: highest representable frequency is sampleRate/2.
-- **Aliasing**: higher-frequency content folding into lower bands when undersampled.
-- **Latency vs buffer size**:
-  - Smaller buffer: lower latency, higher CPU risk.
-  - Larger buffer: more stability, higher latency.
-- **Time vs frequency resolution** tradeoff:
-  - Short windows resolve time better, frequency worse.
-  - Long windows resolve frequency better, time worse.
-- **Phase relationships** affect stereo image and mono compatibility.
-- **Stereo correlation** indicates similarity/opposition between channels.
-- **Silence detection** should account for noise floor and hysteresis, not strict zero.
-- **Onset/transient behavior** needs fast attack and carefully chosen release constants.
-- **dB / dBFS**:
-  - dB is logarithmic ratio.
-  - dBFS references full-scale digital max.
-  - Linear amplitude is not perceptually linear.
+**Core capabilities**
+- Offline-capable operation (hosted or packaged)
+- L/R/C analysis with mono-ish detection and stable playback controls
+- Two-orb stereo baseline (L+R) with trails
+- Band overlay ring + dominant-band HUD
+- URL preset encode/decode (schema versioned)
+- Panel system (audio / sim / bands) with launcher buttons
 
-### 5) Human hearing vs math
+**DoD (maintain forever)**
+- No console errors in normal flows
+- No “zombie audio” after reload/change
+- URL presets remain backward compatible (or migrated intentionally)
 
-- **Psychoacoustics (practical)**: perceived loudness varies by frequency and context.
-- Equal numeric energy does not imply equal perceived loudness.
-- Log-spaced frequency groupings often map better to perception than linear bins.
-- Raw FFT bins are rarely directly meaningful UX; aggregation/scaling/context are needed.
+---
 
-### 6) Common analysis views and limitations
+## Build 112 — v0.1.12 (✅ shipped - internal): “Scrubber + Queue”
 
-- **Waveform**: timing/transients/clipping clues; poor for detailed spectral balance.
-- **Level meter**: loudness trend and headroom; can hide crest factor/frequency shifts.
-- **Spectrum / band energies**: tonal balance snapshot; time detail and phase mostly hidden.
-- **Spectrogram**: time-frequency evolution; absolute phase and stereo geometry hidden.
-- **Stereo image/correlation**: width/mono-compatibility hints; not a full mix diagnosis.
-- **Oscilloscope-style L/R/Lissajous**: phase and symmetry cues; easy to misread without scaling context.
+**Goal:** add navigation without destabilizing 111.
 
-### 7) Audio pipeline thinking
+**Scope**
+- Scrubber bar: waveform overview + seek
+- Playlist/queue: multi-file load, next/prev, click-to-jump, remove, clear
+- Drag/drop audio files onto canvas to enqueue
+- Auto-advance on track end (respect repeat mode)
+- Keyboard: `N/P` track nav; `←/→` seek (shift = ±30s)
 
-Canonical conceptual flow:
+**Non-goals**
+- Playlist state stored in URL presets (runtime-only)
+- ID3 parsing (filename display is fine)
 
-`source -> decode/input -> playback -> analysis taps -> transforms -> render/export`
+**DoD**
+- No-audio-loaded state stays clean
+- Switching tracks resets trails + scrubber view
+- Prev/Next disabled unless queue length ≥ 2
+- No accumulating `ended` handlers (no “double-advance” bugs)
 
-- **Offline playback** (file-driven) and **live input** (mic/stream) have different clocking/permission/lifecycle constraints.
-- **Analysis path vs playback path** should be conceptually separate:
-  - playback must remain stable/low-latency;
-  - analysis may run multiple views, smoothing, and feature extraction.
-- Cleanup concerns: detach handlers, stop tracks/streams, release URLs/resources, avoid stale analyzers.
+**Release note**
+- Build 112 remained the shipped internal queue/scrubber milestone that preceded Release 3.
 
-### 8) Recording / capture concepts
+---
 
-- Recording rendered output means encoding the visual session (and optionally audio) into a media stream.
-- Distinguish:
-  - **source audio** (input media),
-  - **monitored audio** (what user hears),
-  - **captured/exported output** (what gets encoded).
-- Sync concerns: audio and visual clocks may drift unless capture path and timestamps are handled intentionally.
-- **Container vs codec vs format** are distinct:
-  - container (e.g., WebM/MP4),
-  - codec (e.g., VP9/H.264/AAC/Opus),
-  - file extension is not proof of codec compatibility.
+## Build 113 — v0.1.13 (Release 3, ✅ shipped - canonical): Recording / Capture
 
-### 9) Common failure modes and traps
+**Goal:** ship capture/export without destabilizing the queue + scrubber baseline.
 
-- Clipping hidden by post-smoothing visuals.
-- Misleading meters (e.g., peak-only presented as loudness).
-- “Pretty but dishonest” graphics disconnected from measured data.
-- Stale analyzers after source switch.
-- Wrong stereo assumptions (L+R always “better”).
-- Excessive smoothing masking transients.
-- Over-trusting dominant-band logic as semantic truth.
-- Real-time performance traps: overdraw, oversized FFT, unnecessary allocations in render loops.
+**Scope**
+- Dedicated recording panel with a bottom-right launcher
+- Start/Stop flow with elapsed timer, latest export metadata, and download action
+- Runtime format negotiation (`WebM`-first by default; `MP4` available when supported)
+- Runtime recording controls: `Include Audio`, `Preferred Format`, and `Target FPS` (`24` / `30` / `60`)
+- Recording spans track changes and unloaded-audio states without taking ownership away from the transport path
+- Recording settings remain runtime-only and are not stored in presets
+- Band distribution mode control (`linear`, `log`, `mel`, `bark`, `erb`) with legacy preset migration from `logSpacing`
 
-### 10) Design implications (pre-architecture)
+**DoD**
+- Recording support is surfaced clearly before capture starts
+- Exports finalize cleanly and remain downloadable for the current session
+- Active recording survives track changes, queue advance, and queue-end unload states
+- Presets migrate `bands.logSpacing` to `bands.distributionMode` safely
+- Playback, queue, and analysis invariants remain intact while capture is active
 
-- **Configurable**: FFT size/window, smoothing constants, meter ballistics, dB ranges, silence threshold, recording settings.
-- **Measured explicitly**: CPU cost, frame time, analyzer latency, dropped frames, clipping events, peak/RMS history.
-- **Separate modules**: input/decode, transport/playback, analysis engine, visualization mapping, capture/export, preset/runtime state.
-- **First-class interfaces**: signal frame contract, analysis frame contract, transport state, recorder lifecycle, settings schema.
-- **Runtime-only vs preset-worthy**:
-  - runtime-only: active queue, permissions, temporary capture session IDs.
-  - preset-worthy: analyzer/display tunings that define reproducible behavior.
-- **Must be documented**: units, ranges, defaults, update rates, averaging windows, and whether metrics are instantaneous or integrated.
+---
 
-## Product Description
+## Build 114 — v0.1.14: Live Input Sources
 
-Auralprint is a modular web application for audio playback/analysis/recording where visual output is driven by explicit, inspectable signal analysis.
+**Goal:** analyze sources other than file playback.
 
-## Non-goals (Build 113)
+**Scope**
+- Microphone input
+- Tab/system stream input when available (permission-gated)
+- Source switch UI (File / Mic / Stream)
 
-- No claim of mastering-grade loudness compliance metering.
-- No AI tagging or semantic “music understanding.”
-- No network/CDN runtime dependencies.
-- No replacement of analysis truth with purely decorative animation.
+**DoD**
+- Permission failures handled politely
+- Source switching resets analysis state safely
 
-## User Flows (Build 113)
+---
 
-1. Load one or more local audio files.
-2. Play/pause, scrub, and navigate queue (prev/next enabled only when queue length >= 2).
-3. Observe analyzer-driven visual session.
-4. Start recording (MediaRecorder), monitor status/time, stop recording.
-5. Download captured output.
+## Build 115 — v0.1.15: Orbs Overhaul (v1)
 
-## Architecture Principles (Constitution)
+**Goal:** orbs become first-class configurable analyzers.
 
-- Interfaces are stable contracts; modules can evolve.
-- No hidden state/variables/magic numbers.
-- Behavior-affecting controls must be exposed via UX or documented as code-only with rationale.
-- Prefer readable, composable, testable modules.
-- Zero runtime network dependency; all assets local.
-- Must run hosted and offline from `file://` distributable package.
+**Scope**
+- Per-orb spectral targeting (band IDs / ranges)
+- Per-orb aggregation rules (avg now; weighted later)
+- Per-orb color phase space / palette modes
+- Backward-compatible preset migration for orb config
 
-## Run Modes
+**DoD**
+- Orbs can lock to different bands cleanly
+- Presets round-trip without corruption
 
-### Hosted (static host)
+---
 
-- Serve `dist/` on any static host.
-- Ensure all assets are referenced locally (no CDN).
+## Build 116 — v0.1.16: Camera Controls (Render ≠ Sim)
 
-### Offline (`file://`)
+**Goal:** separate simulation space from camera transform.
 
-- Use packaged `portable/` artifact.
-- Open `portable/index.html` directly in a browser.
-- Behavior must not require local HTTP server.
+**Scope**
+- Camera pan / zoom / rotate
+- Camera centers on sim origin by default
+- Reset camera action exists
 
-## Build 113 Definition of Done (verifiable)
+**DoD**
+- Camera never mutates simulation state
+- Presets can store camera state if desired (explicit schema bump)
 
-- [ ] Build 112 baseline behaviors still pass:
-  - [ ] No double-advance on track end (no accumulating `ended` handlers).
-  - [ ] No-audio state remains clean.
-  - [ ] Switching tracks resets trails and scrubber state.
-  - [ ] Prev/Next disabled unless queue length >= 2.
-- [ ] Recording controls exist: Start/Stop + visible status/timer.
-- [ ] Capture uses WebM as canonical output; MP4 only if browser support is confirmed.
-- [ ] Recorded file downloads successfully and is playable.
-- [ ] Recording start/stop performs cleanup (stopped tracks/streams, revoked object URLs where applicable).
-- [ ] Playback/analysis continue behaving correctly before/during/after recording.
-- [ ] No major FPS collapse at sane defaults (document tested defaults and observed range).
+---
 
-## Proposed Repository Layout (Build 113-ready, future-proof for 114–120)
+## Build 117 — v0.1.17: UX + Performance Hardening
 
-```text
-/
-  README.md
-  roadmap.md
-  docs/
-    engineering/
-      audio-briefing.md
-      measurement-definitions.md
-    builds/
-      build-113-dod.md
-  src/
-    app/
-      bootstrap/
-      lifecycle/
-    domain/
-      transport/
-      queue/
-      analysis/
-      visualization/
-      recording/
-      presets/
-    io/
-      decode/
-      playback/
-      capture/
-      export/
-    ui/
-      controls/
-      panels/
-      status/
-    shared/
-      constants/
-      types/
-      utils/
-  public/
-    assets/
-  dist/        # hosted output
-  portable/    # file:// package output
-  releases/
-    Release_3_v0.1.13/
-```
+**Goal:** make it harder to break and easier to use.
 
-## Practical Engineering Takeaways
+**Scope**
+- FPS/CPU safety rails + validation
+- UI affordances: tooltips, small layout fixes, “Reset Visuals”
+- Reduce HUD updates when hidden
 
-- Always state analyzer parameters next to outputs.
-- Treat display smoothing as interpretation, not source truth.
-- Keep playback reliability independent from visualization complexity.
-- Log and expose lifecycle transitions for source switch and recording state.
+**DoD**
+- Defaults don’t melt laptops
+- Hide-panels mode is clean and recoverable
 
-## Vocabulary / Glossary
+---
 
-- **PCM**: Pulse-code modulation sample representation.
-- **dBFS**: Decibels relative to full-scale digital amplitude.
-- **FFT**: Discrete transform estimating frequency content in a finite window.
-- **Nyquist**: Half sample rate; theoretical max representable frequency.
-- **Aliasing**: Folded spectral artifacts from undersampling.
-- **RMS**: Root-mean-square level metric approximating signal power.
-- **Transient**: Fast, short-duration signal event.
-- **Correlation**: Similarity measure between stereo channels.
+## Build 118 — v0.1.18: Per-Orb Band Picker UI
 
-## What This Means for Software Design
+**Goal:** configure orb targets without editing code.
 
-- Build the analyzer as a measurable subsystem with explicit contracts.
-- Treat visualization as a consumer of analysis frames, not a source of truth.
-- Keep runtime operational state separate from persistent presets.
-- Make lifecycle teardown a first-class concern from day one.
+**Scope**
+- Band picker per orb:
+  - search by band name
+  - range select (start/end)
+  - optional named sets (“Air Shelf”, etc.)
+- Visual confirmation in HUD
 
-## Common Wrong Assumptions
+**DoD**
+- Usable orb targeting via UX
+- Presets round-trip correctly
 
-- “If it looks responsive, analysis must be accurate.” (False)
-- “Dominant frequency equals perceived pitch/loudness.” (Often false)
-- “Stereo width implies quality.” (Context-dependent)
-- “MP4 extension guarantees compatibility.” (False: codec/container mismatch common)
-- “Smoothing improves accuracy.” (It improves readability, can reduce fidelity)
+---
 
-## Audio Engineering Readiness Check
+## Build 119 — v0.1.19: Workflow Upgrades
 
-Minimum concepts understood well enough to move into architecture work:
+**Goal:** sharing + iteration becomes frictionless.
 
-- Sound as pressure-over-time; frequency/amplitude/phase/time relationship.
-- PCM fundamentals: sample rate, bit depth, channels, clipping, quantization.
-- Time-domain vs frequency-domain interpretations and limits.
-- FFT/window/smoothing tradeoffs and parameter dependence.
-- Nyquist/aliasing, latency/buffer interactions, and resolution tradeoff.
-- dB/dBFS and linear vs logarithmic representation implications.
-- Psychoacoustic caveats: numeric energy ≠ perceived loudness.
-- Practical role/limits of waveform, meters, spectrum, spectrogram, stereo views.
-- Pipeline separation: source/playback/analysis/render/capture lifecycles.
-- Recording distinctions: source vs monitored vs exported media.
-- Common analyzer and real-time performance failure modes.
+**Scope**
+- Export/import preset JSON
+- Copy preset link remains
+- Optional: screenshot (PNG)
+
+**DoD**
+- Users can save/share configurations reliably
+
+---
+
+## Build 120 — v0.1.20: 3D Orbs + Perspective
+
+**Goal:** controlled leap into 3D (optional mode).
+
+**Scope**
+- Orb rotation axes (x/y/z components)
+- Camera: basic perspective projection
+- Keep 2D mode as stable fallback
+
+**DoD**
+- 3D mode optional; doesn’t destabilize 2D
+- Performance acceptable at defaults
+
+---
+
+## Release discipline notes
+
+- **Only one canonical release at a time.** Release bundles must be reproducible from tags.
+- URL preset schema changes:
+  - bump schema intentionally
+  - accept older schemas via migrations
+- Runtime-only state (playlist, recording session, live input permissions):
+  - never stored in presets unless explicitly designed

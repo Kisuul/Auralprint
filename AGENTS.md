@@ -1,263 +1,322 @@
-# AGENTS.md
+# agents.md — Auralprint
 
-## Mission
-
-Build and maintain **Auralprint** as a modular, offline-capable web application: an **analyzer cosplaying as a visualizer**.
-
-The product must remain:
-- technically honest about the underlying signal,
-- understandable by human maintainers,
-- usable offline,
-- extensible across planned builds without monolithic rewrites.
-
-This repository is for **serious product software**, not a throwaway demo.
+**Purpose**
+This document defines the operating contract for autonomous or semi-autonomous agents working on the Auralprint codebase. It is not guidance; it is **policy**. Deviations must be explicit, justified, and versioned.
 
 ---
 
-## Project identity
+## 0. Project Identity (Do not drift this)
 
-Auralprint is a real-time audio analysis and expressive rendering system.
+Auralprint is a:
+- **Offline-capable** media player
+- **FFT-based audio analysis engine**
+- **Visualizer as a byproduct of analysis**, not the other way around
 
-Current canonical product direction:
-- **Build 111 / v0.1.11** is the current canonical shipped baseline.
-- **Build 112 / v0.1.12** adds scrubber + playlist/queue.
-- **Build 113 / v0.1.13** adds recording / capture.
-- Builds **114–120** extend input sources, orb targeting, camera, workflow, and 3D features.
-
-Follow `roadmap.md` as the authoritative milestone map.
+Core philosophy:
+> *Interfaces are canon. Modules are mutable.*
 
 ---
 
-## Foundational engineering rules
+## 1. Canonical Architecture
 
-### 1) Interfaces are canon; modules are mutable
-- Preserve module boundaries and public contracts.
-- Prefer replacing or improving internals over breaking interfaces.
-- If an interface must change, update the contract docs in the same change.
+### 1.1 State Hierarchy (STRICT)
 
-### 2) No hidden state, no hidden variables, no magic numbers
-- Every persistent or meaningful runtime value must have an owner.
-- Every important constant must be named and live in config unless it is clearly justified as code-only.
-- If a knob affects behavior, it must be:
-  - exposed in UX, or
-  - documented as code-only with a short justification comment.
+```
+CONFIG (immutable, frozen)
+    ↓
+preferences (user-controlled, persisted via presets)
+    ↓
+runtime.settings (derived, active)
+    ↓
+state (ephemeral runtime: audio, UI, bands, etc.)
+```
 
-### 3) Minimal, complete, functional
-- Prefer simple modules with explicit responsibilities.
-- Do not be clever at the expense of readability.
-- Optimize for code a tired human can understand at 3AM.
+**Rules**
+- `CONFIG` MUST NEVER be mutated.
+- `preferences` is the only writable long-lived state.
+- `runtime.settings` MUST be derived via `resolveSettings()`.
+- `state` is volatile and must be safe to reset at any time.
 
-### 4) Analyzer first, visualizer second
-- The rendering must remain grounded in real signal analysis.
-- Do not add “pretty but dishonest” behavior without explicitly naming it as an artistic mode.
-
-### 5) Offline runtime is non-negotiable
-- Runtime must have **zero network dependencies**.
-- No CDN assets.
-- No remote fonts.
-- No telemetry or surprise network calls.
-- Hosted mode is allowed; offline mode must still work.
-
-### 6) Modular source, portable build
-- Source code should remain modular and maintainable.
-- Build outputs may be bundled/minified for portability.
-- The packaged app must be usable from static hosting and, where required by the repo plan, from a portable offline bundle.
+Violation of this hierarchy = architectural bug.
 
 ---
 
-## Delivery model
+### 1.2 Single Source of Truth
 
-When working on this repository, prefer this execution order:
-
-1. Read the relevant contract/docs files.
-2. Read the directly affected source files.
-3. Summarize scope briefly.
-4. Make the smallest coherent change that solves the problem.
-5. Run the relevant checks.
-6. Report exactly what changed.
-
-Do not skip straight to “big refactor” unless the task explicitly demands it.
+- All limits, defaults, and ranges live in `CONFIG`.
+- UI controls must reflect `CONFIG.limits`.
+- No magic numbers. Ever.
 
 ---
 
-## Scope discipline
+### 1.3 Single-File Integrity
 
-### Always do
-- Keep diffs small and attributable.
-- Preserve existing behavior unless the task explicitly changes it.
-- Update docs/contracts when public behavior or interfaces change.
-- Add comments where a future maintainer would otherwise be forced to reverse-engineer intent.
+The app is intentionally shippable as one file.
 
-### Never do
-- Do not refactor unrelated areas “while you are here.”
-- Do not add runtime dependencies casually.
-- Do not add hidden globals.
-- Do not silently change file structure without explanation.
-- Do not invent roadmap scope.
-- Do not replace explicit configuration with hard-coded literals.
+Agents MUST:
+- Preserve single-file operability
+- Avoid introducing build steps unless explicitly approved
+- Avoid external dependencies unless critical and justified
 
 ---
 
-## Configuration discipline
+## 2. Preset System (CRITICAL)
 
-The expected configuration model is:
+### 2.1 Schema Discipline
 
-- `CONFIG` = canonical truth, deep-frozen
-- `preferences` = mutable user preference state
-- `runtime.settings` = resolved, validated settings consumed by running systems
+Preset system is **versioned and backward-compatible**.
+
+If you add/change any field:
+
+**You MUST update ALL of the following:**
+1. `CONFIG.defaults`
+2. `sanitizeAndApply()`
+3. `normalize*()` helpers (e.g., `normalizeOrbDef`)
+4. `writeHashFromPrefs()`
+5. `PRESET_SCHEMA_VERSION` (increment)
+6. Migration handling for older schemas
+
+Failure to update all = **silent data corruption risk**
+
+---
+
+### 2.2 What NOT to Store in Presets
+
+Never include runtime/session state:
+- Playlist / queue
+- Playback position
+- Recording sessions
+- Live input permissions
+
+Presets are **configuration only**, not session snapshots.
+
+---
+
+## 3. Audio + Transport Invariants
+
+### 3.1 Track Lifecycle (SINGLE PATH)
+
+All track changes MUST go through:
+```
+loadAndPlay()
+```
+
+This guarantees:
+- Trail reset
+- Scrubber reset
+- Dominant band reset
+- Clean playback state
+
+Do NOT bypass this.
+
+---
+
+### 3.2 End-of-Track Handling
+
+- Use the existing `_onTrackEnded` path
+- NEVER attach duplicate `ended` listeners
+
+Violation results in:
+- Double-advance bugs
+- Queue desync
+
+---
+
+### 3.3 Scrubber Contract
+
+- Scrubber uses **decoded waveform data**, not live playback buffer
+- Seeking must remain deterministic and stateless
+
+---
+
+## 4. Analysis Engine Constraints
+
+### 4.1 Band System
+
+- Band count: 256 (canonical)
+- Log spacing by default
+- Ceiling must respect Nyquist
+
+**Critical invariant:**
+If `ceilingHz > Nyquist`, highest band collapses.
+
+Agents MUST:
+- Preserve `effectiveCeilingHz = min(configCeiling, nyquist)`
+- Never “simplify” this logic
+
+---
+
+### 4.2 Orb System (Highly Sensitive)
+
+Canonical orb fields:
+```
+id, chanId, bandIds, chirality, startAngleRad
+```
 
 Rules:
-- Running systems should consume `runtime.settings`, not raw preferences.
-- Validation must clamp and normalize.
-- Invariants must be enforced centrally.
-- Runtime-only state must not be mixed into presets without intentional design.
+- Only fields returned by `normalizeOrbDef()` are valid
+- Adding a field requires full preset pipeline update (Section 2)
 
-Examples of runtime-only state:
-- playlist contents
-- active recording session
-- permission grants
-- transient UI visibility state unless intentionally persisted
+Planned extensions (do not pre-implement without roadmap alignment):
+- hueOffsetDeg
+- centerX / centerY
 
 ---
 
-## UX and control exposure rules
+## 5. UI System Constraints
 
-If a behavior matters to users or future tuning, expose it clearly.
+### 5.1 Panel System
 
-Preferred order:
-1. UX control
-2. Config/default with clear name
-3. Code-only knob with explicit justification
+Panels:
+- Audio
+- Queue
+- Sim
+- Bands
 
-Never bury meaningful behavior in unexplained literals.
-
-UI should remain:
-- readable,
-- responsive,
-- keyboard-usable where reasonable,
-- touch-tolerant where practical.
+Rules:
+- Panels must be independently hideable
+- Launchers must always remain accessible
+- Z-index hierarchy must not regress
 
 ---
 
-## Audio / analysis rules
+### 5.2 Accessibility (Non-Optional)
 
-Preserve these conceptual truths:
-- playback path and analysis path are related but not identical concerns,
-- mono/stereo/center analysis distinctions matter,
-- smoothing, FFT size, and band aggregation are meaningful engineering choices,
-- dominant-band logic is useful but not absolute truth.
-
-Do not oversimplify signal behavior just to make visuals easier.
+- Maintain `:focus-visible` behavior
+- Do not remove keyboard navigation
+- Do not introduce hidden interactive elements
 
 ---
 
-## Preset / schema rules
+### 5.3 Performance Safety
 
-If touching presets:
-- treat schema versioning as deliberate,
-- preserve backward compatibility where practical,
-- migrate older schemas explicitly,
-- do not store runtime-only state in presets unless the change explicitly introduces that behavior.
+Agents MUST assume:
+- Users may run on weak hardware
 
----
-
-## Recording / export rules
-
-If touching recording/capture:
-- WebM is the safe default unless browser support clearly permits something else.
-- Separate:
-  - source audio,
-  - monitored/playback audio,
-  - captured/exported audio.
-- Cleanup must be correct:
-  - stop tracks,
-  - revoke blob/object URLs,
-  - avoid memory leaks,
-  - do not leave playback broken after recording ends.
+Avoid:
+- Unbounded loops
+- Per-frame allocations
+- Excessive DOM writes
 
 ---
 
-## Performance rules
+## 6. Queue System (Runtime Only)
 
-This app is real-time and interactive.
+### 6.1 Behavior Guarantees
 
-Prefer:
-- bounded work per frame,
-- capped dt handling,
-- deliberate HUD update frequency,
-- avoiding unnecessary DOM churn,
-- avoiding per-frame allocations when easy to avoid.
+- Multi-file load
+- Click-to-jump
+- Remove / clear
+- Auto-advance
+- Repeat modes respected
 
-Do not trade away clarity for premature micro-optimizations, but do respect frame-time costs.
+### 6.2 Invariants
 
----
-
-## File safety rules
-
-- Do not overwrite large files blindly.
-- Do not rewrite generated outputs unless the task requires it.
-- Do not delete files unless the task explicitly requires deletion.
-- Do not use destructive git commands.
-- Do not revert unrelated user changes.
-
-If you encounter unexpected repo changes, stop and report them.
+- Queue state is ephemeral
+- UI must always reflect actual queue
+- Prev/Next disabled when invalid
 
 ---
 
-## Output format for substantial tasks
+## 7. Change Protocol (MANDATORY)
 
-For non-trivial repository work, prefer this response structure:
+Before implementing any change, an agent must:
 
-1. **READ RECEIPT**
-   - files inspected
+### Step 1 — Classify
+- Bug fix
+- Feature (matches roadmap)
+- Experimental (NOT allowed without explicit flag)
 
-2. **PLAN**
-   - 3–7 bullets max
+### Step 2 — Check Impact Surface
+- CONFIG?
+- Presets?
+- Audio lifecycle?
+- UI panels?
 
-3. **FILES TOUCHED**
-   - exact paths
+### Step 3 — Declare Risk
+- Regression risk
+- Schema impact
+- Performance impact
 
-4. **CHANGES MADE**
-   - concise summary
+### Step 4 — Implement Minimally
+- No refactors unless required
+- No opportunistic cleanup
 
-5. **VERIFICATION**
-   - commands run
-   - results
-   - known limitations if any
-
-Keep it brief and factual.
-
----
-
-## Stop conditions
-
-Stop and report instead of guessing if:
-- a task conflicts with `roadmap.md`,
-- a requested change would break the modular architecture without an approved migration,
-- required files or interfaces are missing,
-- a change would introduce runtime network dependence,
-- existing failing tests/checks appear unrelated to your change,
-- you discover conflicting instructions at different repo levels.
+### Step 5 — Validate
+- No console errors
+- No state leaks
+- No duplicate listeners
+- Presets round-trip
 
 ---
 
-## Review guidelines
+## 8. Roadmap Alignment (DO NOT FREEFORM)
 
-When reviewing code in this repository, prioritize:
-- regressions in shipped behavior,
-- hidden state or hidden constants,
-- broken offline/runtime assumptions,
-- schema compatibility risks,
-- unsafe teardown / cleanup,
-- UI controls that exist but are not actually wired to the intended config,
-- accidental scope expansion,
-- security/privacy regressions,
-- needless complexity.
+Agents MUST align work with roadmap builds:
 
-Treat the following as high severity:
-- playback or analysis corruption,
-- recording/export breakage,
-- preset data loss,
-- runtime network calls,
-- object URL / media / event-handler leaks,
-- breaking canonical build behavior without explicit release intent.
+- **113**: Recording / capture (MediaRecorder, WebM-first)
+- **114**: Live inputs (mic / stream)
+- **115**: Orb overhaul (per-orb bands + color phase)
+- **116**: Camera (render ≠ sim)
+
+If a change does not map to a roadmap item:
+→ It is likely out of scope.
+
+---
+
+## 9. Definition of Done (GLOBAL)
+
+A change is NOT complete unless:
+
+- No console errors in normal flow
+- No memory leaks or listener duplication
+- UI remains coherent at all panel states
+- Presets encode/decode correctly
+- No regression in playback or analysis
+
+---
+
+## 10. Anti-Patterns (HARD FAIL)
+
+Agents MUST NOT:
+
+- Mutate `CONFIG`
+- Introduce magic numbers
+- Store runtime state in presets
+- Bypass `loadAndPlay()`
+- Add duplicate event listeners
+- Break schema compatibility silently
+- Refactor unrelated systems
+- Add hidden state
+
+---
+
+## 11. Guiding Principle
+
+Auralprint is a **living system with strict memory**.
+
+Every change must:
+- Respect past versions
+- Preserve user expectations
+- Extend capability without destabilizing core behavior
+
+> Stability is a feature. Treat it as such.
+
+---
+
+## 12. If You Are Unsure
+
+Do NOT guess.
+
+Instead:
+- Inspect existing patterns
+- Follow established pathways
+- Extend, don’t reinvent
+
+When in doubt:
+> Choose the option that preserves invariants over the one that feels cleaner.
+
+---
+
+**End of Contract**
+
